@@ -14,8 +14,14 @@
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
+coverage/
 *.coverprofile
 profile.cov
+
+# Build artifacts
+bin/
+repository
+chargeback-api
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
