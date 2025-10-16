@@ -135,7 +135,8 @@ stop-local-db: ## Stop local DynamoDB
 
 create-table: ## Create DynamoDB table locally
 	@echo "📋 Creating DynamoDB table..."
-	@aws dynamodb create-table \
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb create-table \
 		--table-name chargebacks \
 		--attribute-definitions \
 			AttributeName=id,AttributeType=S \
@@ -145,13 +146,56 @@ create-table: ## Create DynamoDB table locally
 		--key-schema \
 			AttributeName=id,KeyType=HASH \
 		--global-secondary-indexes \
-			IndexName=transaction-id-index,KeySchema=[{AttributeName=transaction_id,KeyType=HASH}],Projection={ProjectionType=ALL},BillingMode=PAY_PER_REQUEST \
-			IndexName=merchant-id-index,KeySchema=[{AttributeName=merchant_id,KeyType=HASH}],Projection={ProjectionType=ALL},BillingMode=PAY_PER_REQUEST \
-			IndexName=status-index,KeySchema=[{AttributeName=status,KeyType=HASH}],Projection={ProjectionType=ALL},BillingMode=PAY_PER_REQUEST \
+			'IndexName=transaction-id-index,KeySchema=[{AttributeName=transaction_id,KeyType=HASH}],Projection={ProjectionType=ALL}' \
+			'IndexName=merchant-id-index,KeySchema=[{AttributeName=merchant_id,KeyType=HASH}],Projection={ProjectionType=ALL}' \
+			'IndexName=status-index,KeySchema=[{AttributeName=status,KeyType=HASH}],Projection={ProjectionType=ALL}' \
 		--billing-mode PAY_PER_REQUEST \
 		--endpoint-url http://localhost:8000 \
 		|| echo "Table may already exist"
 	@echo "✅ Table created"
+
+create-table-simple: ## Create simple DynamoDB table for development (no GSIs)
+	@echo "📋 Creating simple DynamoDB table for development..."
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb create-table \
+		--table-name chargebacks \
+		--attribute-definitions AttributeName=id,AttributeType=S \
+		--key-schema AttributeName=id,KeyType=HASH \
+		--billing-mode PAY_PER_REQUEST \
+		--endpoint-url http://localhost:8000 \
+		|| echo "Table may already exist"
+	@echo "✅ Simple table created (works with scan fallback)"
+
+drop-table: ## Delete DynamoDB table locally
+	@echo "🗑️  Dropping DynamoDB table..."
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb delete-table \
+		--table-name chargebacks \
+		--endpoint-url http://localhost:8000 \
+		|| echo "Table may not exist"
+	@echo "✅ Table dropped"
+
+recreate-table: drop-table create-table ## Drop and recreate DynamoDB table
+	@echo "🔄 Table recreated successfully"
+
+list-tables: ## List all DynamoDB tables
+	@echo "📋 Listing DynamoDB tables..."
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb list-tables --endpoint-url http://localhost:8000
+
+describe-table: ## Describe the chargebacks table
+	@echo "📋 Describing chargebacks table..."
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb describe-table --table-name chargebacks --endpoint-url http://localhost:8000
+
+debug-db: ## Debug DynamoDB Local status and tables
+	@echo "🔍 Debugging DynamoDB Local..."
+	@echo "Checking if DynamoDB Local is running:"
+	@curl -s http://localhost:8000 | head -2 || echo "❌ DynamoDB Local not responding"
+	@echo "✅ DynamoDB Local is responding"
+	@echo "Listing tables:"
+	@AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_REGION=us-east-1 \
+	aws dynamodb list-tables --endpoint-url http://localhost:8000
 
 # All-in-one development setup
 dev-setup: setup-local-db create-table deps ## Set up complete development environment
