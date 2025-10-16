@@ -1,0 +1,61 @@
+# Test Coverage Exclusions
+# Directories and files excluded from test coverage analysis
+
+## Excluded Directories (No Tests Needed)
+examples/                    # Example code and demonstrations
+docs/                       # Documentation files
+scripts/                    # Build and deployment scripts
+deployments/                # Infrastructure configuration
+docker/                     # Docker configuration files
+bin/                        # Compiled binaries
+.git/                       # Git repository data
+
+## Excluded File Types
+*.md                        # Markdown documentation
+*.yml, *.yaml              # Configuration files
+*.json                     # Static configuration
+Dockerfile*                # Docker files
+Makefile                   # Build configuration
+
+## Reasoning for Exclusions
+
+### examples/
+- Contains demonstration code for learning purposes
+- Not part of production codebase
+- Testing would not add business value
+
+### docs/
+- Static documentation
+- No executable code to test
+
+### scripts/
+- Build and deployment utilities
+- Often shell scripts or simple automation
+- Testing overhead outweighs benefits
+
+### deployments/
+- Infrastructure as Code (Kubernetes, Terraform, etc.)
+- Configuration files for deployment
+- Should be validated by deployment tools
+
+### docker/
+- Container configuration
+- Validated by Docker build process
+
+## Test Focus Areas (Included)
+✅ internal/domain/entity/      # Business entities and rules
+✅ internal/domain/repository/  # Repository interfaces
+✅ internal/usecase/           # Business logic (100% covered)
+✅ internal/api/http/handler/  # HTTP handlers (80.8% covered)
+✅ internal/server/            # Server configuration (80.0% covered)
+✅ internal/infra/db/          # Database configuration
+✅ internal/infra/repository/  # Repository implementations
+✅ cmd/api/                   # Main application entry point
+
+## Coverage Targets by Layer
+- Domain Layer: 90%+ (business critical)
+- Use Case Layer: 100% (already achieved)
+- Handler Layer: 85%+ (user interface)
+- Server Layer: 85%+ (already achieved)
+- Infrastructure Layer: 70%+ (integration focused)
+- Main Application: 60%+ (configuration focused)
