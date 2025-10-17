@@ -61,6 +61,40 @@ internal/
    export DYNAMODB_ENDPOINT=http://localhost:8000
    ```
 
+4. **Configure AWS Credentials**
+   
+   The application supports multiple ways to configure AWS credentials:
+
+   **Option 1: Environment Variables (Local Development)**
+   ```bash
+   export AWS_ACCESS_KEY_ID=your-access-key
+   export AWS_SECRET_ACCESS_KEY=your-secret-key
+   export AWS_SESSION_TOKEN=your-session-token  # Optional for temporary credentials
+   ```
+
+   **Option 2: AWS Profile (Local Development)**
+   ```bash
+   export AWS_PROFILE=your-profile-name
+   ```
+
+   **Option 3: IAM Roles (Production - Recommended)**
+   - For EC2: Attach an IAM role to your EC2 instance
+   - For ECS/Fargate: Use task roles
+   - For Lambda: Function execution role
+   - No environment variables needed - automatic credential detection
+
+   **Option 4: DynamoDB Local (Local Development)**
+   ```bash
+   export DYNAMODB_ENDPOINT=http://localhost:8000
+   # When using local DynamoDB, dummy credentials are automatically used
+   ```
+
+   **Copy example environment file:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
 ## 🚀 Quick Start
 
 ### Local Development with DynamoDB Local
