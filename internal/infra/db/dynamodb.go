@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
@@ -16,29 +19,69 @@ type DynamoDBConfig struct {
 	TableName string
 }
 
-// NewDynamoDBClient creates a new DynamoDB client
+// NewDynamoDBClient creates a new DynamoDB client with proper credential handling
 func NewDynamoDBClient(ctx context.Context, cfg DynamoDBConfig) (*dynamodb.Client, error) {
-	// Load AWS configuration
-	awsCfg, err := config.LoadDefaultConfig(ctx)
+	var awsCfg aws.Config
+	var err error
+
+	// Check if we're in local development mode
+	if cfg.Endpoint != "" {
+		log.Printf("🔧 Local DynamoDB endpoint detected: %s", cfg.Endpoint)
+
+		// For local development, use static credentials or default config
+		if accessKey := os.Getenv("AWS_ACCESS_KEY_ID"); accessKey != "" {
+			log.Println("🔑 Using AWS credentials from environment variables")
+			awsCfg, err = config.LoadDefaultConfig(ctx,
+				config.WithRegion(cfg.Region),
+				config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+					os.Getenv("AWS_ACCESS_KEY_ID"),
+					os.Getenv("AWS_SECRET_ACCESS_KEY"),
+					os.Getenv("AWS_SESSION_TOKEN"),
+				)),
+			)
+		} else {
+			log.Println("🔑 Using static credentials for local DynamoDB")
+			// For DynamoDB Local, use well-known static credentials
+			awsCfg, err = config.LoadDefaultConfig(ctx,
+				config.WithRegion(cfg.Region),
+				config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+					"dummy-access-key-id",
+					"dummy-secret-access-key",
+					"",
+				)),
+			)
+		}
+	} else {
+		log.Println("🔑 Loading AWS credentials using default credential chain")
+		// For production, use the default credential chain
+		// This will try: environment variables -> IAM roles -> AWS profiles -> etc.
+		awsCfg, err = config.LoadDefaultConfig(ctx,
+			config.WithRegion(cfg.Region),
+		)
+	}
+
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load AWS configuration: %w", err)
 	}
 
-	// Override region if specified
-	if cfg.Region != "" {
-		awsCfg.Region = cfg.Region
-	}
+	// Log the region being used
+	log.Printf("🌍 Using AWS region: %s", awsCfg.Region)
 
-	// Create DynamoDB client
-	client := dynamodb.NewFromConfig(awsCfg)
+	// Create DynamoDB client options
+	var clientOptions []func(*dynamodb.Options)
 
 	// Override endpoint if specified (for DynamoDB Local)
 	if cfg.Endpoint != "" {
-		client = dynamodb.NewFromConfig(awsCfg, func(o *dynamodb.Options) {
+		clientOptions = append(clientOptions, func(o *dynamodb.Options) {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
 		})
+		log.Printf("🎯 DynamoDB client configured with custom endpoint: %s", cfg.Endpoint)
 	}
 
+	// Create DynamoDB client
+	client := dynamodb.NewFromConfig(awsCfg, clientOptions...)
+
+	log.Printf("✅ DynamoDB client initialized successfully for table: %s", cfg.TableName)
 	return client, nil
 }
 
