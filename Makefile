@@ -33,7 +33,7 @@ run: build ## Build and run the application
 
 dev: ## Run the application in development mode with live reload
 	@echo "🔄 Starting development server..."
-	@go run ./cmd/api/main.go
+	@PORT=8080 DYNAMODB_ENDPOINT=http://localhost:8000 LOG_LEVEL=DEBUG DYNAMODB_TABLE=chargebacks AWS_REGION=us-east-1 AWS_ACCESS_KEY_ID=fakeMyKeyId AWS_SECRET_ACCESS_KEY=fakeSecretAccessKey go run ./cmd/api/main.go
 
 clean: ## Clean build artifacts and coverage reports
 	@echo "🧹 Cleaning..."
