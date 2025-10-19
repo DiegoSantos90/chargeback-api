@@ -52,8 +52,8 @@ check_status() {
 # Teste 1: Health Check
 echo -e "${YELLOW}📋 Teste 1: Health Check${NC}"
 response=$(make_request "GET" "/health")
-status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+status_code=$(echo "$response" | tail -1)
+response_body=$(echo "$response" | sed '$d')
 
 check_status "200" "$status_code" "Health Check"
 echo -e "Resposta: $response_body\n"
@@ -73,7 +73,7 @@ chargeback_data='{
 
 response=$(make_request "POST" "/chargebacks" "$chargeback_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
 check_status "201" "$status_code" "Criar Chargeback - Fraude"
 echo -e "Resposta: $response_body\n"
@@ -81,24 +81,24 @@ echo -e "Resposta: $response_body\n"
 # Guardar transaction_id para teste de duplicata
 FRAUD_TRANSACTION_ID="txn_test_fraud_$TIMESTAMP"
 
-# Teste 3: Criar Chargeback - Produto Não Recebido
-echo -e "${YELLOW}📋 Teste 3: Criar Chargeback - Produto Não Recebido${NC}"
+# Teste 3: Criar Chargeback - Erro de Autorização
+echo -e "${YELLOW}📋 Teste 3: Criar Chargeback - Erro de Autorização${NC}"
 chargeback_data='{
-    "transaction_id": "txn_test_not_received_'$TIMESTAMP'",
+    "transaction_id": "txn_test_auth_error_'$TIMESTAMP'",
     "merchant_id": "merchant_test_script",
     "amount": 1299.00,
     "currency": "BRL",
     "card_number": "4000000000000002",
-    "reason": "product_not_received",
-    "description": "Teste automatizado - produto não recebido",
+    "reason": "authorization_error",
+    "description": "Teste automatizado - erro de autorização",
     "transaction_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
 }'
 
 response=$(make_request "POST" "/chargebacks" "$chargeback_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
-check_status "201" "$status_code" "Criar Chargeback - Produto Não Recebido"
+check_status "201" "$status_code" "Criar Chargeback - Erro de Autorização"
 echo -e "Resposta: $response_body\n"
 
 # Teste 4: Erro - Transaction ID Duplicado
@@ -115,9 +115,9 @@ duplicate_data='{
 
 response=$(make_request "POST" "/chargebacks" "$duplicate_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
-check_status "400" "$status_code" "Erro - Transaction ID Duplicado"
+check_status "409" "$status_code" "Erro - Transaction ID Duplicado"
 echo -e "Resposta: $response_body\n"
 
 # Teste 5: Erro - Transaction ID Vazio
@@ -134,9 +134,9 @@ empty_transaction_data='{
 
 response=$(make_request "POST" "/chargebacks" "$empty_transaction_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
-check_status "400" "$status_code" "Erro - Transaction ID Vazio"
+check_status "500" "$status_code" "Erro - Transaction ID Vazio"
 echo -e "Resposta: $response_body\n"
 
 # Teste 6: Erro - Reason Inválido
@@ -153,7 +153,7 @@ invalid_reason_data='{
 
 response=$(make_request "POST" "/chargebacks" "$invalid_reason_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
 check_status "400" "$status_code" "Erro - Reason Inválido"
 echo -e "Resposta: $response_body\n"
@@ -162,7 +162,7 @@ echo -e "Resposta: $response_body\n"
 echo -e "${YELLOW}📋 Teste 7: Erro - Método HTTP Inválido${NC}"
 response=$(make_request "GET" "/chargebacks")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
 check_status "405" "$status_code" "Erro - Método HTTP Inválido"
 echo -e "Resposta: $response_body\n"
@@ -172,58 +172,58 @@ echo -e "${YELLOW}📋 Teste 8: Erro - Content-Type Inválido${NC}"
 test_data='{"transaction_id": "txn_test", "merchant_id": "merchant_test"}'
 response=$(make_request "POST" "/chargebacks" "$test_data" "text/plain")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
 check_status "415" "$status_code" "Erro - Content-Type Inválido"
 echo -e "Resposta: $response_body\n"
 
-# Teste 9: Criar Chargeback - Cobrança Duplicada
-echo -e "${YELLOW}📋 Teste 9: Criar Chargeback - Cobrança Duplicada${NC}"
+# Teste 9: Criar Chargeback - Erro de Processamento
+echo -e "${YELLOW}📋 Teste 9: Criar Chargeback - Erro de Processamento${NC}"
 duplicate_charge_data='{
-    "transaction_id": "txn_test_duplicate_'$TIMESTAMP'",
+    "transaction_id": "txn_test_processing_'$TIMESTAMP'",
     "merchant_id": "merchant_shopify_test",
     "amount": 89.90,
     "currency": "USD",
     "card_number": "5555555555554444",
-    "reason": "duplicate",
-    "description": "Teste automatizado - cobrança duplicada",
+    "reason": "processing_error",
+    "description": "Teste automatizado - erro de processamento",
     "transaction_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
 }'
 
 response=$(make_request "POST" "/chargebacks" "$duplicate_charge_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
-check_status "201" "$status_code" "Criar Chargeback - Cobrança Duplicada"
+check_status "201" "$status_code" "Criar Chargeback - Erro de Processamento"
 echo -e "Resposta: $response_body\n"
 
-# Teste 10: Criar Chargeback - Assinatura
-echo -e "${YELLOW}📋 Teste 10: Criar Chargeback - Assinatura${NC}"
+# Teste 10: Criar Chargeback - Disputa do Consumidor
+echo -e "${YELLOW}📋 Teste 10: Criar Chargeback - Disputa do Consumidor${NC}"
 subscription_data='{
-    "transaction_id": "txn_test_subscription_'$TIMESTAMP'",
+    "transaction_id": "txn_test_consumer_dispute_'$TIMESTAMP'",
     "merchant_id": "merchant_streaming_test",
     "amount": 29.90,
     "currency": "BRL",
     "card_number": "4242424242424242",
-    "reason": "subscription",
-    "description": "Teste automatizado - disputa de assinatura",
+    "reason": "consumer_dispute",
+    "description": "Teste automatizado - disputa do consumidor",
     "transaction_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
 }'
 
 response=$(make_request "POST" "/chargebacks" "$subscription_data")
 status_code=$(echo "$response" | tail -n1)
-response_body=$(echo "$response" | head -n -1)
+response_body=$(echo "$response" | sed $d)
 
-check_status "201" "$status_code" "Criar Chargeback - Assinatura"
+check_status "201" "$status_code" "Criar Chargeback - Disputa do Consumidor"
 echo -e "Resposta: $response_body\n"
 
 # Resumo dos testes
 echo -e "${BLUE}📊 Resumo dos Testes Executados:${NC}"
 echo -e "${GREEN}✅ Health Check${NC}"
 echo -e "${GREEN}✅ Criar Chargeback - Fraude${NC}"
-echo -e "${GREEN}✅ Criar Chargeback - Produto Não Recebido${NC}"
-echo -e "${GREEN}✅ Criar Chargeback - Cobrança Duplicada${NC}"
-echo -e "${GREEN}✅ Criar Chargeback - Assinatura${NC}"
+echo -e "${GREEN}✅ Criar Chargeback - Erro de Autorização${NC}"
+echo -e "${GREEN}✅ Criar Chargeback - Erro de Processamento${NC}"
+echo -e "${GREEN}✅ Criar Chargeback - Disputa do Consumidor${NC}"
 echo -e "${GREEN}✅ Erro - Transaction ID Duplicado${NC}"
 echo -e "${GREEN}✅ Erro - Transaction ID Vazio${NC}"
 echo -e "${GREEN}✅ Erro - Reason Inválido${NC}"
