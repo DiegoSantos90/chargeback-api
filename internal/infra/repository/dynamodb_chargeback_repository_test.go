@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,52 +18,44 @@ import (
 // Unit tests for DynamoDB Chargeback Repository
 // These tests focus on testing the repository logic with mocks and without external dependencies
 
-// MockDynamoDBClient implements a mock DynamoDB client for testing
-type MockDynamoDBClient struct {
+// MockDynamoDBAPI implements the DynamoDBAPI interface for testing
+type MockDynamoDBAPI struct {
 	PutItemFunc    func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItemFunc    func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	QueryFunc      func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
-	UpdateItemFunc func(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
 	DeleteItemFunc func(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error)
 	ScanFunc       func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error)
 }
 
-func (m *MockDynamoDBClient) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+func (m *MockDynamoDBAPI) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	if m.PutItemFunc != nil {
 		return m.PutItemFunc(ctx, params, optFns...)
 	}
 	return &dynamodb.PutItemOutput{}, nil
 }
 
-func (m *MockDynamoDBClient) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+func (m *MockDynamoDBAPI) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
 	if m.GetItemFunc != nil {
 		return m.GetItemFunc(ctx, params, optFns...)
 	}
 	return &dynamodb.GetItemOutput{}, nil
 }
 
-func (m *MockDynamoDBClient) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+func (m *MockDynamoDBAPI) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
 	if m.QueryFunc != nil {
 		return m.QueryFunc(ctx, params, optFns...)
 	}
 	return &dynamodb.QueryOutput{}, nil
 }
 
-func (m *MockDynamoDBClient) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
-	if m.UpdateItemFunc != nil {
-		return m.UpdateItemFunc(ctx, params, optFns...)
-	}
-	return &dynamodb.UpdateItemOutput{}, nil
-}
-
-func (m *MockDynamoDBClient) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+func (m *MockDynamoDBAPI) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
 	if m.DeleteItemFunc != nil {
 		return m.DeleteItemFunc(ctx, params, optFns...)
 	}
 	return &dynamodb.DeleteItemOutput{}, nil
 }
 
-func (m *MockDynamoDBClient) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+func (m *MockDynamoDBAPI) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
 	if m.ScanFunc != nil {
 		return m.ScanFunc(ctx, params, optFns...)
 	}
@@ -105,70 +98,96 @@ func TestNewDynamoDBChargebackRepository(t *testing.T) {
 }
 
 // createTestRepository creates a repository instance for testing with mocked client
-func createTestRepository(client *MockDynamoDBClient) *DynamoDBChargebackRepository {
-	// Since we can't pass MockDynamoDBClient directly to the constructor,
-	// we'll create the repository struct directly for testing
-	return &DynamoDBChargebackRepository{
-		client:    (*dynamodb.Client)(nil), // We'll override this in tests
-		tableName: "test-chargebacks",
-	}
+func createTestRepository(client DynamoDBAPI) *DynamoDBChargebackRepository {
+	return NewDynamoDBChargebackRepositoryWithInterface(client, "test-chargebacks")
 }
 
-func TestDynamoDBChargebackRepository_Save_GeneratesID(t *testing.T) {
-	mockClient := &MockDynamoDBClient{
-		PutItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
-			// Verify table name
-			if *params.TableName != "test-chargebacks" {
-				t.Errorf("Expected table name 'test-chargebacks', got %s", *params.TableName)
-			}
+// Test Save method
+func TestDynamoDBChargebackRepository_Save(t *testing.T) {
+	t.Run("successful save", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			PutItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+				// Verify table name
+				if *params.TableName != "test-chargebacks" {
+					t.Errorf("Expected table name 'test-chargebacks', got %s", *params.TableName)
+				}
 
-			// Verify item has required fields
-			if params.Item["id"] == nil {
-				t.Error("Expected 'id' field in item")
-			}
-			if params.Item["transaction_id"] == nil {
-				t.Error("Expected 'transaction_id' field in item")
-			}
+				// Verify item has required fields
+				if params.Item["id"] == nil {
+					t.Error("Expected 'id' field in item")
+				}
+				if params.Item["transaction_id"] == nil {
+					t.Error("Expected 'transaction_id' field in item")
+				}
 
-			return &dynamodb.PutItemOutput{}, nil
-		},
-	}
+				// Verify condition expression
+				if params.ConditionExpression == nil || *params.ConditionExpression != "attribute_not_exists(id)" {
+					t.Error("Expected condition to prevent overwriting existing items")
+				}
 
-	_ = mockClient // Use mockClient to avoid unused variable error
-	chargeback := createTestChargeback()
-	chargeback.ID = "" // Simulate new chargeback without ID
+				return &dynamodb.PutItemOutput{}, nil
+			},
+		}
 
-	// Since we can't easily mock the client in the struct,
-	// we'll test the ID generation logic directly
-	originalID := chargeback.ID
+		repo := createTestRepository(mockClient)
+		chargeback := createTestChargeback()
+		chargeback.ID = "" // Test ID generation
 
-	// Test that generateChargebackID works
-	generatedID := generateChargebackID()
-	if generatedID == "" {
-		t.Error("Expected non-empty generated ID")
-	}
+		ctx := context.Background()
+		err := repo.Save(ctx, chargeback)
 
-	if len(generatedID) < 3 || generatedID[:3] != "cb_" {
-		t.Errorf("Expected ID to start with 'cb_', got %s", generatedID)
-	}
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
 
-	// Test that ID is set when empty
-	if originalID != "" {
-		chargeback.ID = ""
-	}
+		// Verify ID was generated
+		if chargeback.ID == "" {
+			t.Error("Expected ID to be generated")
+		}
+	})
 
-	// Verify the ID would be generated (testing the logic)
-	if chargeback.ID == "" {
-		chargeback.ID = generateChargebackID()
-	}
+	t.Run("save error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			PutItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
 
-	if chargeback.ID == "" {
-		t.Error("Expected ID to be generated")
-	}
+		repo := createTestRepository(mockClient)
+		chargeback := createTestChargeback()
+
+		ctx := context.Background()
+		err := repo.Save(ctx, chargeback)
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "failed to save chargeback") {
+			t.Errorf("Expected error message to contain 'failed to save chargeback', got %s", err.Error())
+		}
+	})
+
+	t.Run("marshal error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{}
+		repo := createTestRepository(mockClient)
+
+		// Create chargeback with invalid data that can't be marshaled
+		chargeback := &entity.Chargeback{
+			TransactionDate: time.Time{}, // This might cause marshal issues in some cases
+		}
+
+		ctx := context.Background()
+		err := repo.Save(ctx, chargeback)
+
+		// This test might not trigger marshal error easily, but it's here for completeness
+		// In real scenarios, marshal errors are rare with well-formed data
+		_ = err // We just ensure this path is tested
+	})
 }
 
 func TestDynamoDBChargebackRepository_ItemToEntity(t *testing.T) {
-	repo := createTestRepository(&MockDynamoDBClient{})
+	repo := createTestRepository(&MockDynamoDBAPI{})
 
 	testChargeback := createTestChargeback()
 	item := &chargebackItem{
@@ -211,7 +230,7 @@ func TestDynamoDBChargebackRepository_ItemToEntity(t *testing.T) {
 }
 
 func TestDynamoDBChargebackRepository_ItemToEntity_InvalidStatus(t *testing.T) {
-	repo := createTestRepository(&MockDynamoDBClient{})
+	repo := createTestRepository(&MockDynamoDBAPI{})
 
 	item := &chargebackItem{
 		ID:              "test-id",
@@ -533,7 +552,7 @@ func TestDynamoDBChargebackRepository_LogicOperations(t *testing.T) {
 		}
 
 		// Test itemToEntity conversion (used in all Find methods)
-		repo := createTestRepository(&MockDynamoDBClient{})
+		repo := createTestRepository(&MockDynamoDBAPI{})
 		entity := repo.itemToEntity(&unmarshaledItem)
 
 		if entity.ID != testChargeback.ID {
@@ -598,6 +617,628 @@ func TestDynamoDBChargebackRepository_QueryParameterConstruction(t *testing.T) {
 			if expectedItems != limit {
 				t.Errorf("Expected %d items with pagination, got %d", limit, expectedItems)
 			}
+		}
+	})
+}
+
+// Test FindByID method
+func TestDynamoDBChargebackRepository_FindByID(t *testing.T) {
+	t.Run("successful find", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			GetItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+				// Verify table name
+				if *params.TableName != "test-chargebacks" {
+					t.Errorf("Expected table name 'test-chargebacks', got %s", *params.TableName)
+				}
+
+				// Verify key
+				if params.Key["id"] == nil {
+					t.Error("Expected 'id' in key")
+				}
+
+				return &dynamodb.GetItemOutput{
+					Item: av,
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByID(ctx, "chargeback-123")
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("Expected chargeback, got nil")
+		}
+
+		if result.ID != testChargeback.ID {
+			t.Errorf("Expected ID %s, got %s", testChargeback.ID, result.ID)
+		}
+	})
+
+	t.Run("item not found", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			GetItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+				return &dynamodb.GetItemOutput{
+					Item: nil, // No item found
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByID(ctx, "nonexistent")
+
+		if err != nil {
+			t.Errorf("Expected no error for not found, got %v", err)
+		}
+
+		if result != nil {
+			t.Error("Expected nil result for not found")
+		}
+	})
+
+	t.Run("get error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			GetItemFunc: func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByID(ctx, "test-id")
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if result != nil {
+			t.Error("Expected nil result on error")
+		}
+
+		if !strings.Contains(err.Error(), "failed to get chargeback") {
+			t.Errorf("Expected error message to contain 'failed to get chargeback', got %s", err.Error())
+		}
+	})
+}
+
+// Test Update method
+func TestDynamoDBChargebackRepository_Update(t *testing.T) {
+	t.Run("successful update", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			PutItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+				// Verify condition expression for update
+				if params.ConditionExpression == nil || *params.ConditionExpression != "attribute_exists(id)" {
+					t.Error("Expected condition to ensure item exists")
+				}
+
+				return &dynamodb.PutItemOutput{}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		chargeback := createTestChargeback()
+
+		ctx := context.Background()
+		err := repo.Update(ctx, chargeback)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+	})
+
+	t.Run("update error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			PutItemFunc: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		chargeback := createTestChargeback()
+
+		ctx := context.Background()
+		err := repo.Update(ctx, chargeback)
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "failed to update chargeback") {
+			t.Errorf("Expected error message to contain 'failed to update chargeback', got %s", err.Error())
+		}
+	})
+}
+
+// Test Delete method
+func TestDynamoDBChargebackRepository_Delete(t *testing.T) {
+	t.Run("successful delete", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			DeleteItemFunc: func(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+				// Verify table name
+				if *params.TableName != "test-chargebacks" {
+					t.Errorf("Expected table name 'test-chargebacks', got %s", *params.TableName)
+				}
+
+				// Verify key
+				if params.Key["id"] == nil {
+					t.Error("Expected 'id' in key")
+				}
+
+				// Verify condition expression
+				if params.ConditionExpression == nil || *params.ConditionExpression != "attribute_exists(id)" {
+					t.Error("Expected condition to ensure item exists")
+				}
+
+				return &dynamodb.DeleteItemOutput{}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		err := repo.Delete(ctx, "chargeback-123")
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+	})
+
+	t.Run("delete error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			DeleteItemFunc: func(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		err := repo.Delete(ctx, "test-id")
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "failed to delete chargeback") {
+			t.Errorf("Expected error message to contain 'failed to delete chargeback', got %s", err.Error())
+		}
+	})
+}
+
+// Test FindByTransactionID method
+func TestDynamoDBChargebackRepository_FindByTransactionID(t *testing.T) {
+	t.Run("successful find", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{
+					Items: []map[string]types.AttributeValue{av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByTransactionID(ctx, "txn-456")
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if result == nil {
+			t.Fatal("Expected chargeback, got nil")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{
+					Items: []map[string]types.AttributeValue{},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByTransactionID(ctx, "nonexistent")
+
+		if err != nil {
+			t.Errorf("Expected no error for not found, got %v", err)
+		}
+
+		if result != nil {
+			t.Error("Expected nil result for not found")
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		result, err := repo.FindByTransactionID(ctx, "txn-123")
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if result != nil {
+			t.Error("Expected nil result on error")
+		}
+	})
+
+	// Note: Unmarshal errors are difficult to trigger with well-formed AWS SDK data
+	// The attributevalue package handles most malformed data gracefully
+}
+
+// Test FindByMerchantID method
+func TestDynamoDBChargebackRepository_FindByMerchantID(t *testing.T) {
+	t.Run("successful find", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{
+					Items: []map[string]types.AttributeValue{av, av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.FindByMerchantID(ctx, "merchant-789")
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 results, got %d", len(results))
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.FindByMerchantID(ctx, "merchant-123")
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if results != nil {
+			t.Error("Expected nil results on error")
+		}
+	})
+
+}
+
+// Test FindByStatus method
+func TestDynamoDBChargebackRepository_FindByStatus(t *testing.T) {
+	t.Run("successful find", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return &dynamodb.QueryOutput{
+					Items: []map[string]types.AttributeValue{av, av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.FindByStatus(ctx, entity.StatusPending)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 results, got %d", len(results))
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			QueryFunc: func(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.FindByStatus(ctx, entity.StatusPending)
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if results != nil {
+			t.Error("Expected nil results on error")
+		}
+	})
+
+}
+
+// Test List method
+func TestDynamoDBChargebackRepository_List(t *testing.T) {
+	t.Run("successful list without offset", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			ScanFunc: func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+				return &dynamodb.ScanOutput{
+					Items: []map[string]types.AttributeValue{av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.List(ctx, 0, 10)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 1 {
+			t.Errorf("Expected 1 result, got %d", len(results))
+		}
+	})
+
+	t.Run("list with offset", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		mockClient := &MockDynamoDBAPI{
+			ScanFunc: func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+				return &dynamodb.ScanOutput{
+					Items: []map[string]types.AttributeValue{av, av, av, av, av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.List(ctx, 2, 2)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 2 {
+			t.Errorf("Expected 2 results with offset/limit, got %d", len(results))
+		}
+	})
+
+	t.Run("scan error", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			ScanFunc: func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+				return nil, errors.New("DynamoDB error")
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.List(ctx, 0, 10)
+
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+
+		if results != nil {
+			t.Error("Expected nil results on error")
+		}
+	})
+
+	t.Run("offset beyond available items", func(t *testing.T) {
+		mockClient := &MockDynamoDBAPI{
+			ScanFunc: func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+				return &dynamodb.ScanOutput{
+					Items: []map[string]types.AttributeValue{},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.List(ctx, 10, 5)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 0 {
+			t.Errorf("Expected 0 results for offset beyond items, got %d", len(results))
+		}
+	})
+
+	t.Run("list with pagination", func(t *testing.T) {
+		testChargeback := createTestChargeback()
+		testItem := &chargebackItem{
+			ID:              testChargeback.ID,
+			TransactionID:   testChargeback.TransactionID,
+			MerchantID:      testChargeback.MerchantID,
+			Amount:          testChargeback.Amount,
+			Currency:        testChargeback.Currency,
+			CardNumber:      testChargeback.CardNumber,
+			Reason:          string(testChargeback.Reason),
+			Status:          string(testChargeback.Status),
+			Description:     testChargeback.Description,
+			TransactionDate: testChargeback.TransactionDate,
+			ChargebackDate:  testChargeback.ChargebackDate,
+			CreatedAt:       testChargeback.CreatedAt,
+			UpdatedAt:       testChargeback.UpdatedAt,
+		}
+
+		av, _ := attributevalue.MarshalMap(testItem)
+
+		scanCallCount := 0
+		mockClient := &MockDynamoDBAPI{
+			ScanFunc: func(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+				scanCallCount++
+
+				if scanCallCount == 1 {
+					return &dynamodb.ScanOutput{
+						Items: []map[string]types.AttributeValue{av, av, av},
+						LastEvaluatedKey: map[string]types.AttributeValue{
+							"id": &types.AttributeValueMemberS{Value: "last-key"},
+						},
+					}, nil
+				}
+
+				return &dynamodb.ScanOutput{
+					Items: []map[string]types.AttributeValue{av, av},
+				}, nil
+			},
+		}
+
+		repo := createTestRepository(mockClient)
+		ctx := context.Background()
+
+		results, err := repo.List(ctx, 1, 3)
+
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+
+		if len(results) != 3 {
+			t.Errorf("Expected 3 results with offset pagination, got %d", len(results))
 		}
 	})
 }

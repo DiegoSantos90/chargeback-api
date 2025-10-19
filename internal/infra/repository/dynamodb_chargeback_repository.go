@@ -16,12 +16,21 @@ import (
 
 // DynamoDBChargebackRepository implements ChargebackRepository using DynamoDB
 type DynamoDBChargebackRepository struct {
-	client    *dynamodb.Client
+	client    DynamoDBAPI
 	tableName string
 }
 
 // NewDynamoDBChargebackRepository creates a new DynamoDB chargeback repository
 func NewDynamoDBChargebackRepository(client *dynamodb.Client, tableName string) repository.ChargebackRepository {
+	return &DynamoDBChargebackRepository{
+		client:    client,
+		tableName: tableName,
+	}
+}
+
+// NewDynamoDBChargebackRepositoryWithInterface creates a new DynamoDB chargeback repository with custom interface
+// This is primarily used for testing with mocks
+func NewDynamoDBChargebackRepositoryWithInterface(client DynamoDBAPI, tableName string) *DynamoDBChargebackRepository {
 	return &DynamoDBChargebackRepository{
 		client:    client,
 		tableName: tableName,

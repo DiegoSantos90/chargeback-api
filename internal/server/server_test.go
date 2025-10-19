@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DiegoSantos90/chargeback-api/internal/domain/entity"
+	"github.com/DiegoSantos90/chargeback-api/internal/domain/service"
 	"github.com/DiegoSantos90/chargeback-api/internal/usecase"
 )
 
@@ -23,6 +24,28 @@ func (m *MockCreateChargebackUseCase) Execute(ctx context.Context, req usecase.C
 		return m.ExecuteFunc(ctx, req)
 	}
 	return nil, nil
+}
+
+// testLogger is a simple logger for testing that ignores all output
+type testLogger struct{}
+
+func (t *testLogger) Log(ctx context.Context, entry service.LogEntry) error { return nil }
+func (t *testLogger) Debug(ctx context.Context, message string, fields ...map[string]interface{}) error {
+	return nil
+}
+func (t *testLogger) Info(ctx context.Context, message string, fields ...map[string]interface{}) error {
+	return nil
+}
+func (t *testLogger) Warn(ctx context.Context, message string, fields ...map[string]interface{}) error {
+	return nil
+}
+func (t *testLogger) Error(ctx context.Context, message string, fields ...map[string]interface{}) error {
+	return nil
+}
+func (t *testLogger) WithContext(ctx context.Context) service.Logger { return t }
+
+func createTestLogger() service.Logger {
+	return &testLogger{}
 }
 
 func TestServer_Routes_POST_Chargebacks(t *testing.T) {
@@ -47,7 +70,7 @@ func TestServer_Routes_POST_Chargebacks(t *testing.T) {
 
 	server := NewServer(ServerConfig{
 		Port: "8080",
-	}, mockUseCase)
+	}, mockUseCase, createTestLogger())
 
 	// Valid request payload
 	payload := map[string]interface{}{
@@ -94,7 +117,7 @@ func TestServer_Routes_GET_Health(t *testing.T) {
 	mockUseCase := &MockCreateChargebackUseCase{}
 	server := NewServer(ServerConfig{
 		Port: "8080",
-	}, mockUseCase)
+	}, mockUseCase, createTestLogger())
 
 	// Act
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -125,7 +148,7 @@ func TestServer_Routes_NotFound(t *testing.T) {
 	mockUseCase := &MockCreateChargebackUseCase{}
 	server := NewServer(ServerConfig{
 		Port: "8080",
-	}, mockUseCase)
+	}, mockUseCase, createTestLogger())
 
 	// Act
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
@@ -143,7 +166,7 @@ func TestServer_Middleware_CORS(t *testing.T) {
 	mockUseCase := &MockCreateChargebackUseCase{}
 	server := NewServer(ServerConfig{
 		Port: "8080",
-	}, mockUseCase)
+	}, mockUseCase, createTestLogger())
 
 	// Act
 	req := httptest.NewRequest(http.MethodOptions, "/chargebacks", nil)
@@ -177,7 +200,7 @@ func TestServer_Middleware_Logging(t *testing.T) {
 	mockUseCase := &MockCreateChargebackUseCase{}
 	server := NewServer(ServerConfig{
 		Port: "8080",
-	}, mockUseCase)
+	}, mockUseCase, createTestLogger())
 
 	// Act
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)

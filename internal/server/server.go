@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/DiegoSantos90/chargeback-api/internal/api/http/handler"
+	"github.com/DiegoSantos90/chargeback-api/internal/domain/service"
 	"github.com/DiegoSantos90/chargeback-api/internal/usecase"
 )
 
@@ -23,6 +23,7 @@ type Server struct {
 	config            ServerConfig
 	mux               *http.ServeMux
 	chargebackHandler *handler.ChargebackHandler
+	logger            service.Logger
 }
 
 // ServerConfig holds server configuration
@@ -45,11 +46,12 @@ func (c ServerConfig) Validate() error {
 }
 
 // NewServer creates a new HTTP server
-func NewServer(config ServerConfig, createChargebackUC CreateChargebackUseCase) *Server {
+func NewServer(config ServerConfig, createChargebackUC CreateChargebackUseCase, logger service.Logger) *Server {
 	server := &Server{
 		config:            config,
 		mux:               http.NewServeMux(),
 		chargebackHandler: handler.NewChargebackHandler(createChargebackUC),
+		logger:            logger,
 	}
 
 	server.setupRoutes()
@@ -98,7 +100,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Log the request
 	duration := time.Since(start)
-	log.Printf("HTTP %s %s - %d - %v", r.Method, r.URL.Path, wrapped.statusCode, duration)
+	s.logger.Info(r.Context(), "HTTP request processed", map[string]interface{}{
+		"method":      r.Method,
+		"path":        r.URL.Path,
+		"status_code": wrapped.statusCode,
+		"duration_ms": float64(duration.Nanoseconds()) / 1000000,
+		"user_agent":  r.Header.Get("User-Agent"),
+		"remote_addr": r.RemoteAddr,
+	})
 }
 
 // routeExists checks if a route exists
@@ -162,7 +171,10 @@ func (s *Server) Start() error {
 	}
 
 	addr := ":" + s.config.Port
-	log.Printf("Starting server on %s", addr)
+	s.logger.Info(context.Background(), "Starting HTTP server", map[string]interface{}{
+		"address": addr,
+		"port":    s.config.Port,
+	})
 
 	server := &http.Server{
 		Addr:         addr,
