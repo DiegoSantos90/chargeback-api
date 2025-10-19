@@ -6,13 +6,16 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"github.com/DiegoSantos90/chargeback-api/internal/domain/repository"
+	"github.com/DiegoSantos90/chargeback-api/internal/domain/service"
 	"github.com/DiegoSantos90/chargeback-api/internal/infra/db"
+	"github.com/DiegoSantos90/chargeback-api/internal/infra/logging"
 	dynamoRepo "github.com/DiegoSantos90/chargeback-api/internal/infra/repository"
 	"github.com/DiegoSantos90/chargeback-api/internal/server"
 	"github.com/DiegoSantos90/chargeback-api/internal/usecase"
@@ -22,10 +25,20 @@ import (
 type Config struct {
 	Port     string
 	DynamoDB db.DynamoDBConfig
+	Logging  LoggingConfig
+}
+
+// LoggingConfig holds the logging configuration
+type LoggingConfig struct {
+	Level   service.LogLevel
+	Format  logging.LogFormat
+	Service string
+	Version string
 }
 
 // Dependencies holds all initialized dependencies
 type Dependencies struct {
+	Logger             service.Logger
 	DynamoClient       *dynamodb.Client
 	ChargebackRepo     repository.ChargebackRepository
 	CreateChargebackUC *usecase.CreateChargebackUseCase
@@ -39,9 +52,6 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	// Log configuration for debugging
-	logConfiguration(config)
-
 	ctx := context.Background()
 	deps, err := initializeDependencies(ctx, config)
 	if err != nil {
@@ -49,8 +59,13 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("🚀 Chargeback API starting on port %s", config.Port)
+		deps.Logger.Info(ctx, "Chargeback API starting", map[string]interface{}{
+			"port": config.Port,
+		})
 		if err := deps.HTTPServer.Start(); err != nil {
+			deps.Logger.Error(ctx, "Failed to start server", map[string]interface{}{
+				"error": err.Error(),
+			})
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
@@ -59,11 +74,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("🛑 Shutting down server...")
+	deps.Logger.Info(ctx, "Shutting down server", nil)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = shutdownCtx
-	log.Println("✅ Server shutdown complete")
+	deps.Logger.Info(ctx, "Server shutdown complete", nil)
 }
 
 func loadConfiguration() Config {
@@ -73,6 +88,12 @@ func loadConfiguration() Config {
 			Endpoint:  getEnvOrDefault("DYNAMODB_ENDPOINT", ""),
 			Region:    getEnvOrDefault("AWS_REGION", "us-east-1"),
 			TableName: getEnvOrDefault("DYNAMODB_TABLE", "chargebacks"),
+		},
+		Logging: LoggingConfig{
+			Level:   parseLogLevel(getEnvOrDefault("LOG_LEVEL", "info")),
+			Format:  parseLogFormat(getEnvOrDefault("LOG_FORMAT", "json")),
+			Service: "chargeback-api",
+			Version: getEnvOrDefault("APP_VERSION", "dev"),
 		},
 	}
 }
@@ -99,13 +120,46 @@ func validateConfiguration(config Config) error {
 }
 
 func initializeDependencies(ctx context.Context, config Config) (*Dependencies, error) {
+	// Initialize logger first
+	loggerConfig := logging.LoggerConfig{
+		Level:       config.Logging.Level,
+		Format:      config.Logging.Format,
+		ServiceName: config.Logging.Service,
+		Version:     config.Logging.Version,
+	}
+
+	logger, err := logging.NewStructuredLogger(loggerConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
+	// Log configuration using the new logger
+	if err := logger.Info(ctx, "Application starting", map[string]interface{}{
+		"port":           config.Port,
+		"aws_region":     config.DynamoDB.Region,
+		"dynamodb_table": config.DynamoDB.TableName,
+		"log_level":      config.Logging.Level.String(),
+		"log_format":     config.Logging.Format.String(),
+		"service_name":   config.Logging.Service,
+		"version":        config.Logging.Version,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to log application startup: %w", err)
+	}
+
 	dynamoClient, err := db.NewDynamoDBClient(ctx, config.DynamoDB)
 	if err != nil {
+		logger.Error(ctx, "Failed to initialize DynamoDB client", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return nil, fmt.Errorf("failed to initialize DynamoDB client: %w", err)
 	}
 
 	// Test DynamoDB connection
-	if err := testDynamoDBConnection(ctx, dynamoClient, config.DynamoDB.TableName); err != nil {
+	if err := testDynamoDBConnection(ctx, dynamoClient, config.DynamoDB.TableName, logger); err != nil {
+		logger.Error(ctx, "Failed to connect to DynamoDB", map[string]interface{}{
+			"error":      err.Error(),
+			"table_name": config.DynamoDB.TableName,
+		})
 		return nil, fmt.Errorf("failed to connect to DynamoDB: %w", err)
 	}
 
@@ -113,9 +167,10 @@ func initializeDependencies(ctx context.Context, config Config) (*Dependencies, 
 	createChargebackUC := usecase.NewCreateChargebackUseCase(chargebackRepo)
 
 	serverConfig := server.ServerConfig{Port: config.Port}
-	httpServer := server.NewServer(serverConfig, createChargebackUC)
+	httpServer := server.NewServer(serverConfig, createChargebackUC, logger)
 
 	return &Dependencies{
+		Logger:             logger,
 		DynamoClient:       dynamoClient,
 		ChargebackRepo:     chargebackRepo,
 		CreateChargebackUC: createChargebackUC,
@@ -130,37 +185,38 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-func logConfiguration(config Config) {
-	log.Println("📊 Application Configuration:")
-	log.Printf("  ├── Port: %s", config.Port)
-	log.Printf("  ├── AWS Region: %s", config.DynamoDB.Region)
-	log.Printf("  ├── DynamoDB Table: %s", config.DynamoDB.TableName)
-
-	if config.DynamoDB.Endpoint != "" {
-		log.Printf("  └── DynamoDB Endpoint: %s (Local Development)", config.DynamoDB.Endpoint)
-	} else {
-		log.Printf("  └── DynamoDB Endpoint: AWS DynamoDB Service (Production)")
-	}
-
-	// Log AWS credential source information
-	if accessKey := os.Getenv("AWS_ACCESS_KEY_ID"); accessKey != "" {
-		log.Printf("🔑 AWS Credentials: Environment Variables (Access Key: %s...)", accessKey[:min(len(accessKey), 8)])
-	} else if profile := os.Getenv("AWS_PROFILE"); profile != "" {
-		log.Printf("🔑 AWS Credentials: AWS Profile (%s)", profile)
-	} else {
-		log.Printf("🔑 AWS Credentials: Default credential chain (IAM Role/Instance Profile)")
+// parseLogLevel converts string to LogLevel
+func parseLogLevel(level string) service.LogLevel {
+	switch strings.ToLower(level) {
+	case "debug":
+		return service.LogLevelDebug
+	case "info":
+		return service.LogLevelInfo
+	case "warn", "warning":
+		return service.LogLevelWarn
+	case "error":
+		return service.LogLevelError
+	default:
+		return service.LogLevelInfo
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// parseLogFormat converts string to LogFormat
+func parseLogFormat(format string) logging.LogFormat {
+	switch strings.ToLower(format) {
+	case "json":
+		return logging.FormatJSON
+	case "text":
+		return logging.FormatText
+	default:
+		return logging.FormatJSON
 	}
-	return b
 }
 
-func testDynamoDBConnection(ctx context.Context, client *dynamodb.Client, tableName string) error {
-	log.Printf("🔍 Testing DynamoDB connection for table: %s", tableName)
+func testDynamoDBConnection(ctx context.Context, client *dynamodb.Client, tableName string, logger service.Logger) error {
+	logger.Info(ctx, "Testing DynamoDB connection", map[string]interface{}{
+		"table_name": tableName,
+	})
 
 	// Try to describe the table to verify it exists and we have access
 	_, err := client.DescribeTable(ctx, &dynamodb.DescribeTableInput{
@@ -168,10 +224,15 @@ func testDynamoDBConnection(ctx context.Context, client *dynamodb.Client, tableN
 	})
 
 	if err != nil {
-		log.Printf("❌ DynamoDB connection test failed: %v", err)
+		logger.Error(ctx, "DynamoDB connection test failed", map[string]interface{}{
+			"error":      err.Error(),
+			"table_name": tableName,
+		})
 		return fmt.Errorf("table '%s' not accessible: %w", tableName, err)
 	}
 
-	log.Printf("✅ DynamoDB connection test successful for table: %s", tableName)
+	logger.Info(ctx, "DynamoDB connection test successful", map[string]interface{}{
+		"table_name": tableName,
+	})
 	return nil
 }
